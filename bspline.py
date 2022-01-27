@@ -51,21 +51,31 @@ def transform_image(array, transform):
     return np.copy(array)
 
 
-if __name__ == '__main__':
+def read_image(path):
     reader = sitk.ImageFileReader()
-    reader.SetFileName("/data2/jiahao/Registration/Datasets/Eliceiri_patches/patch_tlevel3/A/test/1B_A1_R.tif")
+    reader.SetFileName(path)
     image = reader.Execute();
+    return image
 
-    array = sitk.GetArrayViewFromImage(image)
 
-    transform = create_transform(array)
+    
 
-    array2 = transform_image(array, transform) 
-
-    cv2.imshow("before", array/255)
-    cv2.imshow("after", array2/255)
+if __name__ == '__main__':
+    image1 = read_image("/data2/jiahao/Registration/Datasets/Eliceiri_patches/patch_tlevel3/A/test/1B_A1_R.tif")
+    image2 = read_image("/data2/jiahao/Registration/Datasets/Eliceiri_patches/patch_tlevel3/A/test/1B_A3_R.tif")
+    
+    array1 = sitk.GetArrayViewFromImage(image1)
+    array2 = sitk.GetArrayViewFromImage(image2)
+    transform = create_transform(array1)
+    array1_deformed = transform_image(array1, transform) 
+    array2_deformed = transform_image(array2, transform) 
+    
+    cv2.imshow("before", array1/255)
+    cv2.imshow("after", array1_deformed/255)
     cv2.waitKey(0)
-
+    cv2.imshow("before", array2/255)
+    cv2.imshow("after", array2_deformed/255)
+    cv2.waitKey(0)
 
 
 
