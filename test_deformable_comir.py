@@ -42,7 +42,7 @@ import skimage.transform as sktr
 # Local libraries
 from utils.image import *
 from utils.torch import *
-
+from bspline import create_transform, transform_image
 #logTransformA = True
 #logTransformB = False
 
@@ -276,33 +276,23 @@ for i in range(int(np.ceil(N / batch_size))):
             
             newdim = (np.array(batch.shape[2:]) // 128) * 128
             
-            #L1 = modelA(batch[:, modA, :newdim[0], :newdim[1]])
-            #L2 = modelB(batch[:, modB, :newdim[0], :newdim[1]])
             L1_before = modelA(deform(padded_batch[:, modA, :, :]))
-            #L2_before = modelB(deform(padded_batch[:, modB, :, :]))
             L1_after = deform(modelA(padded_batch[:, modA, :, :]))
-            #L2_after = deform(modelB(padded_batch[:, modB, :, :]))
-
             L1_before = L1_before[:, :, padsz:padsz+orig_shape[2], padsz:padsz+orig_shape[3]]
-            #L2_before = L2_before[:, :, padsz:padsz+orig_shape[2], padsz:padsz+orig_shape[3]]
             L1_after = L1_after[:, :, padsz:padsz+orig_shape[2], padsz:padsz+orig_shape[3]]
-            #L2_after = L2_after[:, :, padsz:padsz+orig_shape[2], padsz:padsz+orig_shape[3]]
+            
         
             for j in range(len(batch)):#L1.shape[0]):
                 path1 = modA_out_path + names[j]
-                #path2 = modB_out_path + names[j]
+                path2 = modB_out_path + names[j]
                 im1_before = L1_before[j].permute(1, 2, 0).cpu().detach().numpy()
-                #im2_before = L2_before[j].permute(1, 2, 0).cpu().detach().numpy()
                 im1_after = L1_after[j].permute(1, 2, 0).cpu().detach().numpy()
-                #im2_after = L2_after[j].permute(1, 2, 0).cpu().detach().numpy()
 
                 if apply_sigmoid:
                     im1_before = np.round(scipy.special.expit(im1_before) * 255).astype('uint8')
-                    #im2_before = np.round(scipy.special.expit(im2_before) * 255).astype('uint8')
                     im1_after = np.round(scipy.special.expit(im1_after) * 255).astype('uint8')
-                    #im2_after = np.round(scipy.special.expit(im2_after) * 255).astype('uint8')
-                    skio.imsave(path1, im1_after)
-                    #skio.imsave(path2, im2_after)
+                    skio.imsave(path1, im1_before)
+                    skio.imsave(path2, im1_after)
                 else:
                     skio.imsave(path1, im1_after)
                     skio.imsave(path2, im2_after)
