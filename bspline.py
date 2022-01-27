@@ -3,62 +3,68 @@ import numpy as np
 import cv2
 
 
-N = 834
-grid_spacing = 64
-
-reader = sitk.ImageFileReader()
-reader.SetFileName("/data2/jiahao/Registration/Datasets/Eliceiri_patches/patch_tlevel3/A/test/1B_A1_R.tif")
-image = reader.Execute();
-
-array = sitk.GetArrayViewFromImage(image)
 
 
-#def create_transform():
-ctrl_pts = 7, 7
-fix_edges = 2
 
-ctrl_pts = np.array(ctrl_pts, np.uint32)
-SPLINE_ORDER = 3
-mesh_size = ctrl_pts - SPLINE_ORDER
-transform = sitk.BSplineTransformInitializer(image, mesh_size.tolist())
-params = transform.GetParameters()
+def create_transform(array):
+    N = 834
+    grid_spacing = 64
+    ctrl_pts = 7, 7
+    fix_edges = 2
 
-grid_shape = *ctrl_pts, 2
+    ctrl_pts = np.array(ctrl_pts, np.uint32)
+    SPLINE_ORDER = 3
+    mesh_size = ctrl_pts - SPLINE_ORDER
 
-max_displacement = 200
-uv = np.random.rand(*grid_shape) - 0.5  # [-0.5, 0.5)
-uv *= 2  # [-1, 1)
+    image = sitk.GetImageFromArray(array)
 
-uv *= max_displacement
+    transform = sitk.BSplineTransformInitializer(image, mesh_size.tolist())
 
+    grid_shape = *ctrl_pts, 2
 
-for i in range(fix_edges):
-    uv[i, :] = 0
-    uv[-1 - i, :] = 0
-    uv[:, i] = 0
-    uv[:, -1 - i] = 0
+    max_displacement = 200
+    uv = np.random.rand(*grid_shape) - 0.5  # [-0.5, 0.5)
+    uv *= 2  # [-1, 1)
 
-transform.SetParameters(uv.flatten(order='F').tolist())
+    uv *= max_displacement
 
 
-resampler = sitk.ResampleImageFilter()
-resampler.SetReferenceImage(image)
-resampler.SetTransform(transform)
-resampler.SetInterpolator(sitk.sitkLinear)
-resampler.SetDefaultPixelValue(0.5)
-resampler.SetOutputPixelType(sitk.sitkFloat32)
-resampled = resampler.Execute(image)
+    for i in range(fix_edges):
+        uv[i, :] = 0
+        uv[-1 - i, :] = 0
+        uv[:, i] = 0
+        uv[:, -1 - i] = 0
 
-array2 = sitk.GetArrayViewFromImage(resampled)
-array3 = 1 - array2
+    transform.SetParameters(uv.flatten(order='F').tolist())
+    return transform
 
-print(np.max(array))
-print(np.max(array2))
+def transform_image(array, transform):
+    image = sitk.GetImageFromArray(array)
+    resampler = sitk.ResampleImageFilter()
+    resampler.SetReferenceImage(image)
+    resampler.SetTransform(transform)
+    resampler.SetInterpolator(sitk.sitkLinear)
+    resampler.SetDefaultPixelValue(0.5)
+    resampler.SetOutputPixelType(sitk.sitkFloat32)
+    resampled = resampler.Execute(image)
+    array = sitk.GetArrayViewFromImage(resampled)
+    return np.copy(array)
 
-cv2.imshow("before", array/255)
-cv2.imshow("after", array2/255)
 
-cv2.waitKey(0)
+if __name__ == '__main__':
+    reader = sitk.ImageFileReader()
+    reader.SetFileName("/data2/jiahao/Registration/Datasets/Eliceiri_patches/patch_tlevel3/A/test/1B_A1_R.tif")
+    image = reader.Execute();
+
+    array = sitk.GetArrayViewFromImage(image)
+
+    transform = create_transform(array)
+
+    array2 = transform_image(array, transform) 
+
+    cv2.imshow("before", array/255)
+    cv2.imshow("after", array2/255)
+    cv2.waitKey(0)
 
 
 
