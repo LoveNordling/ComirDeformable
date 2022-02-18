@@ -17,6 +17,7 @@ import sys
 import random
 import re
 import warnings
+import copy
 
 # Deep Learning libraries
 import torch
@@ -39,6 +40,8 @@ import skimage
 import skimage.io as skio
 import skimage.transform as sktr
 import cv2
+import SimpleITK as sitk
+
 # Local libraries
 from utils.image import *
 from utils.torch import *
@@ -167,7 +170,7 @@ class MultimodalDataset(Dataset):
 
 # %%
 print(len(sys.argv), sys.argv)
-if len(sys.argv) < 6:
+if len(sys.argv) < 7:
     print('Use: inference_comir.py model_path mod_a_path mod_b_path mod_a_out_path mod_b_out_path')
     sys.exit(-1)
 
@@ -176,6 +179,7 @@ modA_path = sys.argv[2]
 modB_path = sys.argv[3]
 modA_out_path = sys.argv[4]
 modB_out_path = sys.argv[5]
+csv_path = sys.argv[6]
 
 if modA_path[-1] != '/':
     modA_path += '/'
@@ -260,10 +264,32 @@ def deform_image(image, transform):
 
 def find_features(images):
     images = images[0,:,:,:]
-    for in in range(images.shape[0]):
-        
+
+    features = []
+    sift = cv2.SIFT_create(100)
 
     
+    for i in range(images.shape[0]):
+        image = images[i,:,:]
+        image = cv2.normalize(image, None, 0, 255, cv2.NORM_MINMAX).astype('uint8')
+        kp = sift.detect(image,None)
+        features.append(kp)
+    
+    return features
+
+
+def transform_features(features, T):
+    new_features = []
+    for point in features:
+        
+        p = point.pt
+        new_point = cv2.KeyPoint(p[0], p[1], point.angle, point.response, point.octave, point.class_id)
+        p = new_point.pt
+        new_point.pt = T.TransformPoint(p)
+        new_features.append(new_point)
+        
+    return new_features
+
 # How many images to compute in one iteration?
 batch_size = 1
 
@@ -283,8 +309,7 @@ for i in range(int(np.ceil(N / batch_size))):
         names.append(dset.get_name(j))
     img1 = batch[0][:,:,0]
     transform = create_transform(img1)
-    deformed = transform_image(img1, transform)
-    
+
     if device.type == 'cuda' and torch.__version__ >= '1.6.0':
         with torch.cuda.amp.autocast(): # pytorch>=1.6.0 required
             img1 = batch[0][:,:,0]
@@ -294,9 +319,6 @@ for i in range(int(np.ceil(N / batch_size))):
             batch = torch.tensor(np.stack(batch), device=device).permute(0, 3, 1, 2)
             batch_deformed = deform_images(batch.cpu().detach().numpy(), transform)
             batch_deformed = torch.tensor(batch_deformed, device=device)
-            
-            #cv2.imshow("original", img1)
-            #cv2.imshow("deformed", batch_deformed[0,0,:,:].cpu().detach().numpy())
 
             padsz = 128
             orig_shape = batch.shape
@@ -307,43 +329,59 @@ for i in range(int(np.ceil(N / batch_size))):
                                  mode='reflect')
             padded_batch_deformed = F.pad(batch_deformed, (padsz, padsz+pad1, padsz,
                                                            padsz + pad2), mode='reflect')
-            
+            landmarks_deformed = find_features(batch_deformed.cpu().detach().numpy())
+            landmarks = transform_features(landmarks_deformed[0], transform)
             newdim = (np.array(batch.shape[2:]) // 128) * 128
             
             L1_before =  modelA(padded_batch_deformed[:, modA, :, :])
-            L1 = modelA(padded_batch[:, modA, :, :])
+            #L1 = modelA(padded_batch[:, modA, :, :])
+            L2 = modelB(padded_batch[:, modB, :, :])
+            
             L1_before = L1_before[:, :, padsz:padsz+orig_shape[2], padsz:padsz+orig_shape[3]]
-            L1 = L1[:, :, padsz:padsz+orig_shape[2], padsz:padsz+orig_shape[3]]
-
+            #L1 = L1[:, :, padsz:padsz+orig_shape[2], padsz:padsz+orig_shape[3]]
+            L2 = L2[:, :, padsz:padsz+orig_shape[2], padsz:padsz+orig_shape[3]]
             
             
             for j in range(len(batch)):#L1.shape[0]):
                 path1 = modA_out_path + names[j]
                 path2 = modB_out_path + names[j]
+
                 im1_before = L1_before[j].permute(1, 2, 0).cpu().detach().numpy()
                 im1_before = scipy.special.expit(im1_before)
                 im1_before = im1_before[:,:,0]
-                im1 = L1[j].permute(1, 2, 0).cpu().detach().numpy()
-                im1 = scipy.special.expit(im1[:,:,0]).astype('float32')
-                im1_after = deform_image(im1, transform)
 
+                #im1 = L1[j].permute(1, 2, 0).cpu().detach().numpy()
+                #im1 = scipy.special.expit(im1[:,:,0]).astype('float32')
+                #im1_after = deform_image(im1, transform)
+
+                im2 = L2[j].permute(1, 2, 0).cpu().detach().numpy()
+                im2 = scipy.special.expit(im2[:,:,0]).astype('float32')
+                
+                im2_after = im2# deform_image(im2, transform)
+                
                 if apply_sigmoid:
-                    mask = np.ones(im1.shape)
+                    mask = np.ones(im1_before.shape)
                     mask = deform_image(mask, transform)
-                    #cv2.imshow("mask", mask)
+
                     im1_before[mask < 1] = 0
-                    im1_after[mask < 1] = 0
-                    diff =(im1_before-im1_after)
+                    #im1_after[mask < 1] = 0
+                    #im2_after[mask < 1] = 0
+                    diff =(im1_before-im2_after)
                     ssd = np.sum(diff*diff)
                     SSDs.append(ssd)
-                    #print(ssd)
+                    
                     im1_before = np.round(im1_before * 255).astype('uint8')
-                    im1_after = np.round(im1_after * 255).astype('uint8')
+                    #im1_after = np.round(im1_after * 255).astype('uint8')
+                    im2_after = np.round(im2_after * 255).astype('uint8')
+                    #im1_before =cv2.drawKeypoints(im1_before, landmarks_deformed[j], im1_before)
+                    #im2_after = cv2.drawKeypoints(im2_after, landmarks, im2_after)
+                    #for l, ld in zip(landmarks, landmarks_deformed[j]):
+                    #    print(l.pt, ld.pt)
                     #cv2.imshow("before", im1_before)
-                    #cv2.imshow("after", im1_after)
+                    #cv2.imshow("after", im2_after)
                     #cv2.waitKey(0)
                     skio.imsave(path1, im1_before)
-                    skio.imsave(path2, im1_after)
+                    skio.imsave(path2, im2_after)
                 else:
                     skio.imsave(path1, im1_after)
                     skio.imsave(path2, im2_after)
@@ -398,7 +436,8 @@ for i in range(int(np.ceil(N / batch_size))):
             idx += 1
 
     del L1_before
-    del L1
+    #del L1
+    del L2
     #del L2_before
     #del L2_after
         
