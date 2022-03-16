@@ -6,9 +6,9 @@ import cv2
 
 
 
-def create_transform(array, max_displacement=200):
-    ctrl_pts =  7, 7
-    fix_edges = 2
+def create_transform(array, max_displacement=50):
+    ctrl_pts =  9, 9
+    fix_edges = 3
 
     ctrl_pts = np.array(ctrl_pts, np.uint32)
     SPLINE_ORDER = 3

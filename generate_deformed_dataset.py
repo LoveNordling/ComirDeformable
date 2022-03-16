@@ -18,6 +18,7 @@ import random
 import re
 import warnings
 import copy
+import csv
 
 # Deep Learning libraries
 import torch
@@ -170,7 +171,7 @@ class MultimodalDataset(Dataset):
 
 # %%
 print(len(sys.argv), sys.argv)
-if len(sys.argv) < 7:
+if len(sys.argv) < 6:
     print('Use: inference_comir.py model_path mod_a_path mod_b_path mod_a_out_path mod_b_out_path')
     sys.exit(-1)
 
@@ -179,7 +180,7 @@ modA_path = sys.argv[2]
 modB_path = sys.argv[3]
 modA_out_path = sys.argv[4]
 modB_out_path = sys.argv[5]
-csv_path = sys.argv[6]
+
 
 if modA_path[-1] != '/':
     modA_path += '/'
@@ -290,6 +291,17 @@ def transform_features(features, T):
         
     return new_features
 
+
+def save_landmarks(landmarks, path):
+
+    with open(path, 'w+') as csv_file:
+        
+        writer = csv.writer(csv_file)
+        for landmark in landmarks:
+            point = landmark.pt
+            writer.writerow(point)
+        
+
 # How many images to compute in one iteration?
 batch_size = 1
 
@@ -371,8 +383,15 @@ for i in range(int(np.ceil(N / batch_size))):
                     SSDs.append(ssd)
                     
                     im1_before = np.round(im1_before * 255).astype('uint8')
-                    #im1_after = np.round(im1_after * 255).astype('uint8')
                     im2_after = np.round(im2_after * 255).astype('uint8')
+                    csv_path1 = path1.replace(".tif", ".csv")
+                    csv_path2 = path2.replace(".tif", ".csv")
+                    csv_path1 = path1.replace(".png", ".csv")
+                    csv_path2 = path2.replace(".png", ".csv")
+                    save_landmarks(landmarks_deformed[j], csv_path1)
+                    save_landmarks(landmarks, csv_path2)
+                    
+                    
                     #im1_before =cv2.drawKeypoints(im1_before, landmarks_deformed[j], im1_before)
                     #im2_after = cv2.drawKeypoints(im2_after, landmarks, im2_after)
                     #for l, ld in zip(landmarks, landmarks_deformed[j]):
@@ -380,6 +399,10 @@ for i in range(int(np.ceil(N / batch_size))):
                     #cv2.imshow("before", im1_before)
                     #cv2.imshow("after", im2_after)
                     #cv2.waitKey(0)
+                    w = im1_before.shape[1]
+                    #padding = 32
+                    #im1_before = im1_before[padding:2-padding,padding:2-padding]
+                    #im2_after = im2_after[padding:2-padding,padding:2-padding]
                     skio.imsave(path1, im1_before)
                     skio.imsave(path2, im2_after)
                 else:
