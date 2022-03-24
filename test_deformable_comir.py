@@ -258,9 +258,9 @@ def deform_image(image, transform):
     return deformed_image
 
 
-def find_features(images):
-    images = images[0,:,:,:]
-    for in in range(images.shape[0]):
+#def find_features(images):
+#    images = images[0,:,:,:]
+#    for i in range(images.shape[0]):
         
 
     
@@ -339,9 +339,9 @@ for i in range(int(np.ceil(N / batch_size))):
                     #print(ssd)
                     im1_before = np.round(im1_before * 255).astype('uint8')
                     im1_after = np.round(im1_after * 255).astype('uint8')
-                    #cv2.imshow("before", im1_before)
-                    #cv2.imshow("after", im1_after)
-                    #cv2.waitKey(0)
+                    cv2.imshow("before", im1_before)
+                    cv2.imshow("after", im1_after)
+                    cv2.waitKey(0)
                     skio.imsave(path1, im1_before)
                     skio.imsave(path2, im1_after)
                 else:
