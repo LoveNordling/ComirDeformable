@@ -5,8 +5,8 @@ import subprocess
 import numpy as np
 import cv2
 import matplotlib.pyplot as plt
-
-
+import pandas as pd
+import SimpleITK as sitk
 
 
 def register_deformed_comirs(modA_path, modB_path, modA_comir_path, modB_comir_path, config_path, out_path):
@@ -38,8 +38,8 @@ def register_deformed_comirs(modA_path, modB_path, modA_comir_path, modB_comir_p
         comir_pathA = os.path.join(modA_comir_path, filename + image_extension)
         comir_pathB = os.path.join(modB_comir_path, filename + image_extension)
         landmark_filename = filename + ".csv"
-        landmarkA_path = os.path.join(modA_comir_path, landmark_filename)
-        landmarkB_path = os.path.join(modB_comir_path, landmark_filename)
+        landmarkA_path = os.path.join(modA_path, landmark_filename)
+        landmarkB_path = os.path.join(modB_path, landmark_filename)
         landmark_registered_path = os.path.join(out_path, landmark_filename)
         
         registered_path = os.path.join(out_path, filename + image_extension)
@@ -71,6 +71,92 @@ def register_deformed_comirs(modA_path, modB_path, modA_comir_path, modB_comir_p
         #if i > 3:
         #    break
 
+
+def register_elastix(modA_path, modB_path, elastix_output_dir, gridspacing):
+    if not os.path.exists(elastix_out_dir):
+        os.makedirs(elastix_out_dir)
+    running_mse_before = []
+    running_mse_after = []
+
+    filenames = os.listdir(modA_path)
+    filenames_images = [x for x in filenames if  x.endswith(".tif") or x.endswith(".png")]
+    filenames_landmarks = [x for x in filenames if x.endswith(".csv")]
+    filenames_images.sort()
+    filenames_landmarks.sort()
+    N = len(filenames_images)
+    for i, names in enumerate(zip(filenames_images, filenames_landmarks)):
+        (image_name, landmarks_name) = names
+        print("Registering image  {} {}/{}".format(image_name, i+1,N))
+        landmarkA_path = os.path.join(modA_path, landmarks_name)
+        landmarkB_path = os.path.join(modB_path, landmarks_name)
+        
+        pathA = os.path.join(modA_path, image_name)
+        pathB = os.path.join(modB_path, image_name)
+
+        registered_landmarks_path = os.path.join(elastix_out_dir, landmarks_name)
+
+        registered_path = os.path.join(elastix_out_dir, image_name)
+        
+        fixedImage = sitk.ReadImage(pathB, sitk.sitkInt8)
+        movingImage = sitk.ReadImage(pathA, sitk.sitkInt8)
+        fixedImage = sitk.GetArrayFromImage(fixedImage)
+        if len(fixedImage.shape) == 3:
+            fixedImage = cv2.cvtColor(fixedImage, cv2.COLOR_BGR2GRAY)
+        fixedImage = sitk.GetImageFromArray(fixedImage)
+
+
+        movingImage = sitk.GetArrayFromImage(movingImage)
+        if len(movingImage.shape) == 3:
+            movingImage = cv2.cvtColor(movingImage, cv2.COLOR_BGR2GRAY)
+        movingImage = sitk.GetImageFromArray(movingImage)
+        elastixImageFilter = sitk.ElastixImageFilter()
+        elastixImageFilter.SetFixedImage(fixedImage)
+        elastixImageFilter.SetMovingImage(movingImage)
+        parameterMapVector = sitk.VectorOfParameterMap()
+        parameterMap = sitk.GetDefaultParameterMap("bspline")
+
+        spacings = ('3.5', '2.803221', '1.988100', '1.410000', '1.000000')
+        n_res = len(spacings)
+        parameterMap['NumberOfResolutions'] = [str(n_res)]
+        parameterMap['GridSpacingSchedule'] = spacings[(len(spacings)-n_res)::]
+        parameterMap['MaxumNumberOfIterations'] = ['1024']
+        parameterMap['FinalGridSpacingInPhysicalUnits']=[str(gridspacing)]
+        
+        parameterMapVector.append(parameterMap)
+        elastixImageFilter.SetParameterMap(parameterMapVector)
+
+        elastixImageFilter.LogToConsoleOff()
+        elastixImageFilter.Execute()
+
+        transformParameterMap = elastixImageFilter.GetTransformParameterMap()
+
+        transformixImageFilter = sitk.TransformixImageFilter()
+        transformixImageFilter.SetTransformParameterMap(transformParameterMap)
+        transformixImageFilter.ComputeDeformationFieldOn()
+        transformixImageFilter.LogToConsoleOff()
+        transformixImageFilter.Execute()
+        deformationField = transformixImageFilter.GetDeformationField()
+        deformationField = sitk.GetArrayFromImage(deformationField)
+        deformationField = deformationField.astype(np.float64)
+        deformationField = sitk.GetImageFromArray(deformationField, True)
+
+        transform = sitk.DisplacementFieldTransform(deformationField)
+        pointsA = np.genfromtxt(landmarkA_path, delimiter=',')
+        pointsB = np.genfromtxt(landmarkB_path, delimiter=',')
+
+        registeredPointsB = []
+        for i in range(pointsB.shape[0]):
+            p = pointsB[i,:]
+            newp = transform.TransformPoint(p)#cv2.KeyPoint(p1, p2))
+            registeredPointsB.append(newp)
+
+        registeredPointsB = np.array(registeredPointsB)
+        
+        pd.DataFrame(registeredPointsB).to_csv(registered_landmarks_path,index=False,header=False)
+        resultsImage = sitk.GetArrayFromImage(elastixImageFilter.GetResultImage()).astype(np.uint8)
+        cv2.imwrite(registered_path, resultsImage)
+        cv2.waitKey(0)
+        
 def evaluate_registration(pathA, pathB, registered_path):
 
     running_mse_before = []
@@ -88,12 +174,14 @@ def evaluate_registration(pathA, pathB, registered_path):
         landmarksA = np.genfromtxt(landmarkA_path, delimiter=',')
         landmarksB = np.genfromtxt(landmarkB_path, delimiter=',')
         landmarksA_registered = np.genfromtxt(landmark_registered_path, delimiter=',')
-
-        mse_before = ((landmarksA-landmarksB)**2).mean()
-        mse_after = (np.abs((landmarksA_registered - landmarksB))).mean()
+        
+        mse_before = np.abs(landmarksA-landmarksB).mean()
+        mse_after = np.abs(landmarksA_registered - landmarksB).mean()
         running_mse_before.append(mse_before)
         running_mse_after.append(mse_after)
-        print("MSE A and B: {} --- MSE registered A and B: {}".format(mse_before, mse_after))
+        
+        #print("MSE A & B: {} --- MSE registered A & B: {}".format(mse_before, mse_after))
+        
 
 
     running_mse_before = np.array(running_mse_before)
@@ -115,31 +203,45 @@ def evaluate_registration(pathA, pathB, registered_path):
         accuracy = successes/N
         accuracies_before.append(accuracy)
 
-
+    
 
     return thresholds, accuracies_before, accuracies_after
 
 
+
+
+
+
 print(len(sys.argv), sys.argv)
-if len(sys.argv) < 7:
+if len(sys.argv) < 3:
     print('Use: inference_comir.py model_path mod_a_path mod_b_path mod_a_out_path mod_b_out_path')
     sys.exit(-1)
 
 if __name__ == "__main__":
 
-    modA_path = sys.argv[1]
-    modB_path = sys.argv[2]
-    modA_comir_path = sys.argv[3]
-    modB_comir_path = sys.argv[4]
-    config_path = sys.argv[5]
-    out_path = sys.argv[6]
+    root = sys.argv[1]
+    config_path = sys.argv[2]
+    modA_path = os.path.join(root, "A")
+    modB_path = os.path.join(root, "B")
+    modA_comir_path = os.path.join(root, "A_comir")
+    modB_comir_path = os.path.join(root, "B_comir")
+    out_path = os.path.join(root, "registered")
+    elastix_out_dir = os.path.join(root, "elastix")
+    gridspacing = sys.argv[3] #Good number is 16 for zuirch or 32 for eliceiri
     
-    register_deformed_comirs(modA_path, modB_path, modA_comir_path, modB_comir_path, config_path, out_path)
+
+    #register_deformed_comirs(modA_path, modB_path, modA_comir_path, modB_comir_path, config_path, out_path)
+    register_elastix(modA_path, modB_path, elastix_out_dir, gridspacing)
     
-    thresholds, accuracies_before, accuracies_after = evaluate_registration(modA_comir_path, modB_comir_path, out_path)
+    thresholds, accuracies_before, accuracies_after = evaluate_registration(modA_path, modB_path, out_path)
 
     plt.plot(thresholds, accuracies_before, label="No registration")
     plt.plot(thresholds, accuracies_after, label="INSPIRE registration")
+    print("hello")
+    thresholds, accuracies_before, accuracies_after = evaluate_registration(modB_path, modA_path, elastix_out_dir)
+
+    plt.plot(thresholds, accuracies_after, label="Elastix")
+    
     plt.ylabel('Accuracy')
     plt.xlabel('Landmark distance threshold')
     
