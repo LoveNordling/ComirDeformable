@@ -6,7 +6,7 @@ import cv2
 
 
 
-def create_transform(array, max_displacement=50):
+def create_transform(array, max_displacement=20):
     ctrl_pts =  9, 9
     fix_edges = 3
 

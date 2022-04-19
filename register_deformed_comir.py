@@ -174,16 +174,26 @@ def evaluate_registration(pathA, pathB, registered_path):
         landmarksA = np.genfromtxt(landmarkA_path, delimiter=',')
         landmarksB = np.genfromtxt(landmarkB_path, delimiter=',')
         landmarksA_registered = np.genfromtxt(landmark_registered_path, delimiter=',')
-        
+        """
         mse_before = np.abs(landmarksA-landmarksB).mean()
         mse_after = np.abs(landmarksA_registered - landmarksB).mean()
+        """
+        
+        mse_before = np.sqrt(np.sum((landmarksA-landmarksB)**2, axis=-1))
+        mse_after = np.sqrt(np.sum((landmarksA_registered-landmarksB)**2, axis=-1))
+        
+        #mse_after = np.abs(landmarksA_registered - landmarksB)
         running_mse_before.append(mse_before)
         running_mse_after.append(mse_after)
+        
         
         #print("MSE A & B: {} --- MSE registered A & B: {}".format(mse_before, mse_after))
         
 
-
+    #running_mse_before = [item for sublist in running_mse_before for item in sublist]
+    #running_mse_after = [item for sublist in running_mse_after for item in sublist]
+    running_mse_before = [x.mean() for x in running_mse_before]
+    running_mse_after = [x.mean() for x in running_mse_after]
     running_mse_before = np.array(running_mse_before)
     running_mse_after = np.array(running_mse_after)
     
@@ -191,16 +201,20 @@ def evaluate_registration(pathA, pathB, registered_path):
     accuracies_after = []
     thresholds = []
     threshold = 0
-    step_size = 0.1 
+    step_size = 0.1
+    
+
+    print(np.mean(running_mse_after < running_mse_before) )
+    
     for i in range(300):
         successes = np.sum(running_mse_after <= threshold)
-        accuracy = successes/N
+        accuracy = successes/len(running_mse_after)
         accuracies_after.append(accuracy)
         thresholds.append(threshold)
         threshold = threshold + step_size
         
         successes = np.sum(running_mse_before <= threshold)
-        accuracy = successes/N
+        accuracy = successes/len(running_mse_before)
         accuracies_before.append(accuracy)
 
     
@@ -231,13 +245,13 @@ if __name__ == "__main__":
     
 
     #register_deformed_comirs(modA_path, modB_path, modA_comir_path, modB_comir_path, config_path, out_path)
-    register_elastix(modA_path, modB_path, elastix_out_dir, gridspacing)
+    #register_elastix(modA_path, modB_path, elastix_out_dir, gridspacing)
     
     thresholds, accuracies_before, accuracies_after = evaluate_registration(modA_path, modB_path, out_path)
 
     plt.plot(thresholds, accuracies_before, label="No registration")
     plt.plot(thresholds, accuracies_after, label="INSPIRE registration")
-    print("hello")
+
     thresholds, accuracies_before, accuracies_after = evaluate_registration(modB_path, modA_path, elastix_out_dir)
 
     plt.plot(thresholds, accuracies_after, label="Elastix")
