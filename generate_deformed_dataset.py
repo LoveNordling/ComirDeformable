@@ -131,7 +131,7 @@ class MultimodalDataset(Dataset):
                 
                 if filename not in dataset.keys():
                     dataset[filename] = [None, None]
-
+                
                 img = skio.imread(pathname)
                 img = skimage.img_as_float(img)
 
@@ -336,6 +336,7 @@ batch_size = 1
 
 def create_deformed_dataset(dset, batch_size, displacement):
     N = len(dset)
+    print(N)
     for i in range(N):
 
         data = dset.get(i, augment=False)

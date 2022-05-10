@@ -11,7 +11,7 @@ import SimpleITK as sitk
 
 def register_deformed_comirs(modA_path, modB_path, modA_comir_path, modB_comir_path, config_path, out_path):
     
-
+    print("registering comirs")
 
     filenames = os.listdir(modA_path)
     filenames.sort()
@@ -73,6 +73,7 @@ def register_deformed_comirs(modA_path, modB_path, modA_comir_path, modB_comir_p
 
 
 def register_elastix(modA_path, modB_path, elastix_output_dir, gridspacing):
+    print("registering elastix")
     if not os.path.exists(elastix_out_dir):
         os.makedirs(elastix_out_dir)
     running_mse_before = []
@@ -194,6 +195,9 @@ def evaluate_registration(pathA, pathB, registered_path):
     #running_mse_after = [item for sublist in running_mse_after for item in sublist]
     running_mse_before = [x.mean() for x in running_mse_before]
     running_mse_after = [x.mean() for x in running_mse_after]
+    #running_mse_before = [np.amax(x) for x in running_mse_before]
+    #running_mse_after = [np.amax(x) for x in running_mse_after]
+    
     running_mse_before = np.array(running_mse_before)
     running_mse_after = np.array(running_mse_after)
     
@@ -206,7 +210,7 @@ def evaluate_registration(pathA, pathB, registered_path):
 
     print(np.mean(running_mse_after < running_mse_before) )
     
-    for i in range(300):
+    for i in range(200):
         successes = np.sum(running_mse_after <= threshold)
         accuracy = successes/len(running_mse_after)
         accuracies_after.append(accuracy)
@@ -243,17 +247,25 @@ if __name__ == "__main__":
     elastix_out_dir = os.path.join(root, "elastix")
     gridspacing = sys.argv[3] #Good number is 16 for zuirch or 32 for eliceiri
     
-
+    
     #register_deformed_comirs(modA_path, modB_path, modA_comir_path, modB_comir_path, config_path, out_path)
     #register_elastix(modA_path, modB_path, elastix_out_dir, gridspacing)
     
     thresholds, accuracies_before, accuracies_after = evaluate_registration(modA_path, modB_path, out_path)
-
+    success_rate_noreg = accuracies_before
+    success_rate_comir_inspire = accuracies_after
+    
     plt.plot(thresholds, accuracies_before, label="No registration")
     plt.plot(thresholds, accuracies_after, label="INSPIRE registration")
 
     thresholds, accuracies_before, accuracies_after = evaluate_registration(modB_path, modA_path, elastix_out_dir)
-
+    success_rate_elastix = accuracies_after
+    no_regisration_result_path = os.path.join(out_path, "success_rate_no_registration.csv")
+    comir_inspire_result_path = os.path.join(out_path, "success_rate_comir_inspire.csv")
+    elastix_result_path = os.path.join(out_path, "success_rate_elastix.csv")
+    pd.DataFrame(np.array([thresholds,success_rate_noreg]).T).to_csv(no_regisration_result_path,index=False,header=False)
+    pd.DataFrame(np.array([thresholds,success_rate_comir_inspire]).T).to_csv(comir_inspire_result_path,index=False,header=False)
+    pd.DataFrame(np.array([thresholds,success_rate_elastix]).T).to_csv(elastix_result_path,index=False,header=False)
     plt.plot(thresholds, accuracies_after, label="Elastix")
     
     plt.ylabel('Accuracy')

@@ -27,6 +27,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import Dataset
 import torchvision
+from torchvision.transforms.functional import affine
 from torch.utils.tensorboard import SummaryWriter
 import pytorch_ssim
 # Other libraries
@@ -81,7 +82,7 @@ def read_args():
         print('No training set provided.')
         sys.exit(-1)
 
-    valid_keys = {'export_folder', 'val_path_a', 'val_path_b', 'log_a', 'log_b', 'iterations', 'channels', 'equivariance', 'l1', 'l2', 'temperature', 'workers', 'critic'}
+    valid_keys = {'export_folder', 'val_path_a', 'val_path_b', 'log_a', 'log_b', 'iterations', 'channels', 'equivariance', 'l1', 'l2', 'temperature', 'workers', 'critic', 'crop_size'}
 
     args['train_path_a'] = sys.argv[1]
     args['train_path_b'] = sys.argv[2]
@@ -100,6 +101,7 @@ def read_args():
     args['workers'] = 4
     args['temperature'] = 0.5
     args['critic'] = 'MSE'
+    args['crop_size'] = 128
 
     i = 3
     while i < cnt:
@@ -116,7 +118,7 @@ def read_args():
 
         if key == 'log_a' or key == 'log_b' or key == 'equivariance':
             args[key] = int(val) != 0
-        elif key == 'iterations' or key == 'channels' or key == 'workers':
+        elif key == 'iterations' or key == 'channels' or key == 'workers' or key == 'crop_size':
             args[key] = int(val)
         elif key == 'l1' or key == 'l2' or key == 'temperature':
             args[key] = float(val)
@@ -338,7 +340,8 @@ class MultimodalDataset(Dataset):
         return self.images[idx]
 
 class ImgAugTransform:
-    def __init__(self, testing=False):
+    def __init__(self, testing=False, crop_size=128):
+        
         if not testing:
             self.aug = iaa.Sequential([
                 iaa.Fliplr(0.5),
@@ -346,11 +349,11 @@ class ImgAugTransform:
                 iaa.Sometimes(
                     0.5,
                     iaa.GaussianBlur(sigma=(0, 2.0))),
-                iaa.CenterCropToFixedSize(128,128),
+                iaa.CenterCropToFixedSize(crop_size,crop_size)#, position='normal'),#croptofixedsize
             ])
         else:
             self.aug = iaa.Sequential([
-                iaa.CropToFixedSize(128,128),
+                iaa.CropToFixedSize(crop_size,crop_size),
             ])
 
     def __call__(self, img):
@@ -358,11 +361,14 @@ class ImgAugTransform:
         return self.aug.augment_image(img)
 
 print("Loading train set...")
-dset = MultimodalDataset(modA_train_path + '/*', modB_train_path + '/*', logA=logTransformA, logB=logTransformB, transform=ImgAugTransform())
+
+crop_size=args['crop_size']
+
+dset = MultimodalDataset(modA_train_path + '/*', modB_train_path + '/*', logA=logTransformA, logB=logTransformB, transform=ImgAugTransform(crop_size=crop_size))
 if modA_val_path is not None and modB_val_path is not None:
     validation_enabled = True
     print("Loading test set...")
-    dset_test = MultimodalDataset(modA_val_path + '/*', modB_val_path + '/*', logA=logTransformA, logB=logTransformB, transform=ImgAugTransform(testing=True))
+    dset_test = MultimodalDataset(modA_val_path + '/*', modB_val_path + '/*', logA=logTransformA, logB=logTransformB, transform=ImgAugTransform(testing=True, crop_size=crop_size))
 else:
     validation_enabled = False
 
@@ -488,6 +494,19 @@ def pos_error(similarities):
 
 losses = {"train": [], "test": []}
 
+
+def create_random_affine(batch_size, max_angle=180, min_scale=0.5, max_scale=1.5, max_shear=30):
+    angle = np.random.uniform(-max_angle, max_angle, size=batch_size)
+    scale = np.random.uniform(min_scale, max_scale, size=batch_size)
+    shear_x = np.random.uniform(-max_shear, max_shear, size=batch_size)
+    shear_y = np.random.uniform(-max_shear, max_shear, size=batch_size)
+    transforms = {"angle": angle, "scale": scale, "shear_x": shear_x, "shear_y": shear_y}
+    #transforms = []
+    #transforms = [lambda x: affine(x, float(angle[i]), [0, 0], float(scale[i]), [float(shear_x[i]), float(shear_y[i])]) for i in range(batch_size)]
+
+    return transforms
+
+    
 def test():
     """Runs the model on the test data."""
     modelA.eval()
@@ -545,18 +564,59 @@ for epoch in range(1, epochs+1):
             # Applies random 90 degrees rotations to the data (group p4)
             # This step enforces the formula of equivariance: d(f(T(x)), T^{-1}(f(x)))
             # With f(x) the neural network, T(x) a transformation, T^{-1}(x) the inverse transformation
+            """
             random_rotA = np.random.randint(4, size=batch_size)
             random_rotB = np.random.randint(4, size=batch_size)
             dataA_p4 = batch_rotate_p4(dataA, random_rotA, device1)
             dataB_p4 = batch_rotate_p4(dataB, random_rotB, device2)
+            
+            random_affineA = create_random_affine(batch_size)
+            random_affineB = create_random_affine(batch_size)
 
+            dataA_transformed = batch_affine(dataA, random_affineA, device1)
+            dataB_transformed = batch_affine(dataB, random_affineB, device2)
+            
             # Compute the forward pass
-            L1 = modelA(dataA_p4)
-            L2 = modelB(dataB_p4)
+            L1 = modelA(dataA_transformed)
+            L2 = modelB(dataB_transformed)
 
             # Applies the inverse of the 90 degree rotation to recover the right positions
+            L1_ungrouped = batch_affine(L1, random_affineB, device1)
+            L2_ungrouped = batch_affine(L2, random_affineA, device2)
+            
             L1_ungrouped = batch_rotate_p4(L1, -random_rotA, device1)
-            L2_ungrouped = batch_rotate_p4(L2, -random_rotB, device2)
+            L2_ungrouped = batch_rotate_p4(L2, -random_rotB, device2)"""
+            random_affine = create_random_affine(batch_size)
+            #random_affineB = create_random_affine(batch_size)
+            transformA_first = np.random.random() > 0.5
+            dataA_transformed = batch_affine(dataA, random_affine, device1)
+            dataB_transformed = batch_affine(dataB, random_affine, device2)
+            if transformA_first:
+                L1 = modelA(dataA_transformed)
+                L2 = modelB(dataB)
+                L1_ungrouped = L1
+                L2_ungrouped = batch_affine(L2, random_affine, device2)
+            else:
+                L1 = modelA(dataA)
+                L2 = modelB(dataB_transformed)
+                L1_ungrouped = batch_affine(L1, random_affine, device1)
+                L2_ungrouped = L2
+
+            """
+            mask = torch.ones_like(L2_ungrouped)
+            maskt = batch_affine(mask, random_affine, device1)
+            
+            L1_ungrouped = L1_ungrouped.detach().cpu().numpy()[0,0,:,:]
+            #L1_ungrouped = L1_ungrouped * (mask > 0.9)
+            #L2_ungrouped = L2_ungrouped * (mask > 0.9)
+            #masked_image = L2_ungrouped.detach().cpu().numpy()[0,0,:,:]
+            mask = mask.detach().cpu().numpy()[0,0,:,:]
+            maskt = maskt.detach().cpu().numpy()[0,0,:,:]
+            cv2.imshow("image", L1_ungrouped*255)
+            cv2.imshow("mask", mask)
+            cv2.imshow("mask transformed", maskt*255)
+            cv2.waitKey(0)
+            """
         else:
             
             L1 = modelA(dataA)
@@ -616,8 +676,8 @@ for epoch in range(1, epochs+1):
     if validation_enabled:
         _, similarities = test()
 
-    image1 = dataA[:4,:,:,:]#.cpu().detach().numpy()
-    image2 = dataB[:4,:,:,:]#.cpu().detach().numpy()
+    image1 = dataA_transformed[:4,:,:,:]
+    image2 = dataB_transformed[:4,:,:,:]
     comirA = L1_ungrouped[:4,:,:,:]
     comirB = L2_ungrouped[:4,:,:,:]
     image1 = torch.cat([image1, image1, image1], 1)
