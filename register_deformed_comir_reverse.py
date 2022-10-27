@@ -43,12 +43,13 @@ def register_deformed_comirs(modA_path, modB_path, modA_comir_path, modB_comir_p
         landmark_filename = filename + ".csv"
         landmarkA_path = os.path.join(modA_path, landmark_filename)
         landmarkB_path = os.path.join(modB_path, landmark_filename)
+
         landmark_registered_path = os.path.join(out_path, landmark_filename)
         
         registered_path = os.path.join(out_path, filename + image_extension)
         comir_registered_path = os.path.join(out_path, "comir_" + filename + image_extension)
     
-        
+        """
         #Perform registration
         t = time.time()
         process = subprocess.Popen(['../inspire-build/InspireRegister', '2', '-ref', comir_pathB, '-flo', comir_pathA, '-deform_cfg', config_path, '-out_path_deform_forward', tforward_path, '-out_path_deform_reverse', treverse_path],
@@ -65,9 +66,9 @@ def register_deformed_comirs(modA_path, modB_path, modA_comir_path, modB_comir_p
         process = subprocess.Popen(['../inspire-build/InspireTransform', '-dim', '2', '-16bit', '1', 'interpolation', 'linear', '-transform', tforward_path, '-ref', pathB, '-in', pathA, '-out', registered_path, '-bg', "min"],
                                    stdout=subprocess.PIPE, 
                                    stderr=subprocess.PIPE)
-        stdout, stderr = process.communicate()
-        
-        process = subprocess.Popen(['../itkAlphaAMD-build/ACTransformLandmarks', '-dim', '2', '-transform', treverse_path, '-in', landmarkA_path, '-out', landmark_registered_path],
+        stdout, stderr = process.communicate()"""
+
+        process = subprocess.Popen(['../itkAlphaAMD-build/ACTransformLandmarks', '-dim', '2', '-transform', tforward_path, '-in', landmarkB_path, '-out', landmark_registered_path],
                                    stdout=subprocess.PIPE, 
                                    stderr=subprocess.PIPE)
         stdout, stderr = process.communicate()
@@ -77,7 +78,7 @@ def register_deformed_comirs(modA_path, modB_path, modA_comir_path, modB_comir_p
         #    break
 
 
-def register_deformed(modA_path, modA_original_path, config_path, out_path):
+def register_deformed(modA_path, modB_path, modA_original_path, config_path, out_path):
     
     print("registering original")
 
@@ -103,12 +104,13 @@ def register_deformed(modA_path, modA_original_path, config_path, out_path):
         
         landmark_filename = filename + ".csv"
         landmarkA_path = os.path.join(modA_path, landmark_filename)
+        landmarkB_path = os.path.join(modB_path, landmark_filename)
         landmark_registered_path = os.path.join(out_path, landmark_filename)
         
         registered_path = os.path.join(out_path, filename + image_extension)
         comir_registered_path = os.path.join(out_path, "comir_" + filename + image_extension)
     
-
+        """
         #Perform registration
         t = time.time()
         process = subprocess.Popen(['../inspire-build/InspireRegister', '2', '-ref', pathA_original, '-flo', pathA, '-deform_cfg', config_path, '-out_path_deform_forward', tforward_path, '-out_path_deform_reverse', treverse_path],
@@ -121,8 +123,8 @@ def register_deformed(modA_path, modA_original_path, config_path, out_path):
                                    stderr=subprocess.PIPE)
         stdout, stderr = process.communicate()
     
-
-        process = subprocess.Popen(['../itkAlphaAMD-build/ACTransformLandmarks', '-dim', '2', '-transform', treverse_path, '-in', landmarkA_path, '-out', landmark_registered_path],
+        """
+        process = subprocess.Popen(['../itkAlphaAMD-build/ACTransformLandmarks', '-dim', '2', '-transform', tforward_path, '-in', landmarkB_path, '-out', landmark_registered_path],
                                    stdout=subprocess.PIPE, 
                                    stderr=subprocess.PIPE)
         stdout, stderr = process.communicate()
@@ -326,6 +328,7 @@ if __name__ == "__main__":
     
     root = sys.argv[1]
     config_path = sys.argv[2]
+    voxelmorph = int(sys.argv[3]) == 1
     modA_path = os.path.join(root, "A")
     modB_path = os.path.join(root, "B")
     modA_path_original = os.path.join(root, "A_original")
@@ -333,13 +336,14 @@ if __name__ == "__main__":
     modB_comir_path = os.path.join(root, "B_comir")
     out_path = os.path.join(root, "registered")
     elastix_out_dir = os.path.join(root, "elastix")
-    voxelmorph_dir = os.path.join(root, "voxelmorph")
-    gridspacing = sys.argv[3] #Good number is 16 for zuirch or 32 for eliceiri
+    if voxelmorph:
+        voxelmorph_dir = os.path.join(root, "voxelmorph")
+    gridspacing = sys.argv[4] #Good number is 16 for zuirch or 32 for eliceiri
 
     out_path_mono = os.path.join(root, "registered_mono")
     
-    #register_deformed_comirs(modA_path, modB_path, modA_comir_path, modB_comir_path, config_path, out_path)
-    #register_deformed(modA_path, modA_path_original, config_path, out_path_mono)
+    register_deformed_comirs(modA_path, modB_path, modA_comir_path, modB_comir_path, config_path, out_path)
+    #register_deformed(modA_path, modB_path, modA_path_original, config_path, out_path_mono)
     #register_elastix(modA_path, modB_path, elastix_out_dir, gridspacing)
 
 
@@ -360,10 +364,11 @@ if __name__ == "__main__":
     thresholds, distances_voxelmorph, success_rate_voxelmorph = evaluate_MSE(modA_path_original, voxelmorph_dir)
     """                         
     thresholds, distances, success_rate_noreg = evaluate_registration(modA_path, modB_path)
-    thresholds, distances_mono, success_rate_inspire = evaluate_registration(modB_path, out_path_mono)
-    thresholds, distances_comir, success_rate_comir_inspire = evaluate_registration(modB_path, out_path)
+    thresholds, distances_mono, success_rate_inspire = evaluate_registration(modA_path, out_path_mono)
+    thresholds, distances_comir, success_rate_comir_inspire = evaluate_registration(modA_path, out_path)
     thresholds, distances_elastix, success_rate_elastix = evaluate_registration(modA_path, elastix_out_dir)
-    thresholds, distances_voxelmorph, success_rate_voxelmorph = evaluate_registration(modA_path, voxelmorph_dir)
+    if voxelmorph:
+        thresholds, distances_voxelmorph, success_rate_voxelmorph = evaluate_registration(modA_path, voxelmorph_dir)
                                   
 
     
@@ -371,7 +376,8 @@ if __name__ == "__main__":
     plt.plot(thresholds, success_rate_noreg, label="No registration")
     plt.plot(thresholds, success_rate_comir_inspire, label="INSPIRE CoMIR")
     plt.plot(thresholds, success_rate_elastix, label="Elastix")
-    plt.plot(thresholds, success_rate_voxelmorph, label="voxelmorph")
+    if voxelmorph:
+        plt.plot(thresholds, success_rate_voxelmorph, label="voxelmorph")
     plt.ylabel('Accuracy')
     plt.xlabel('Landmark distance threshold')
     plt.ylim([0, 1])
@@ -383,14 +389,16 @@ if __name__ == "__main__":
     comir_inspire_result_path = os.path.join(out_path, "success_rate_comir_inspire.csv")
     inspire_result_path = os.path.join(out_path, "success_rate_inspire.csv")
     elastix_result_path = os.path.join(out_path, "success_rate_elastix.csv")
-    voxelmorph_result_path = os.path.join(out_path, "success_rate_voxelmorph.csv")
+    if voxelmorph:
+        voxelmorph_result_path = os.path.join(out_path, "success_rate_voxelmorph.csv")
     
     
     pd.DataFrame(np.array([thresholds,success_rate_noreg]).T).to_csv(no_regisration_result_path,index=False,header=False)
     pd.DataFrame(np.array([thresholds,success_rate_comir_inspire]).T).to_csv(comir_inspire_result_path,index=False,header=False)
     pd.DataFrame(np.array([thresholds,success_rate_inspire]).T).to_csv(inspire_result_path,index=False,header=False)
     pd.DataFrame(np.array([thresholds,success_rate_elastix]).T).to_csv(elastix_result_path,index=False,header=False)
-    pd.DataFrame(np.array([thresholds,success_rate_voxelmorph]).T).to_csv(voxelmorph_result_path,index=False,header=False)
+    if voxelmorph:
+        pd.DataFrame(np.array([thresholds,success_rate_voxelmorph]).T).to_csv(voxelmorph_result_path,index=False,header=False)
                                   
     
     plt.figure()
